@@ -9,8 +9,8 @@ likes = Table(
     Column("tweet_id", ForeignKey("tweets.id"), primary_key=True),
 )
 
-# Таблица для связи "Многие ко многим" (Подписки/Фоловеры)
-followers = Table(
+# Переименовали переменную, чтобы не путалась с названием связи
+followers_table = Table(
     "followers",
     Base.metadata,
     Column("follower_id", ForeignKey("users.id"), primary_key=True),
@@ -26,13 +26,22 @@ class User(Base):
     api_key = Column(String, unique=True, index=True, nullable=False)
 
     tweets = relationship("Tweet", back_populates="author")
-    # Связи для фоловинга [cite: 219, 225]
+
+    # Теперь связи прописаны явно с обеих сторон (PyCharm будет доволен)
     following = relationship(
         "User",
-        secondary=followers,
-        primaryjoin=(id == followers.c.follower_id),
-        secondaryjoin=(id == followers.c.following_id),
-        backref="followers_ref"
+        secondary=followers_table,
+        primaryjoin=(id == followers_table.c.follower_id),
+        secondaryjoin=(id == followers_table.c.following_id),
+        back_populates="followers"
+    )
+
+    followers = relationship(
+        "User",
+        secondary=followers_table,
+        primaryjoin=(id == followers_table.c.following_id),
+        secondaryjoin=(id == followers_table.c.follower_id),
+        back_populates="following"
     )
 
 

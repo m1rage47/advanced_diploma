@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from typing import List
 
 from database import get_db
-from models import User, Tweet, Media, likes, followers
+from models import User, Tweet, Media, likes, followers_table
 from sсhemas import (
     BaseResponse, TweetCreate, TweetListResponse,
     MediaResponse, UserProfile, UserShort, TweetResponse
@@ -62,6 +62,36 @@ async def get_tweets(
         ))
 
     return {"result": True, "tweets": tweets_res}
+
+@router.get("/users/{user_id}")
+async def get_user_profile(
+        user_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Получение информации о произвольном профиле"""
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.followers),
+            selectinload(User.following)
+        )
+        .where(User.id == user_id)
+    )
+    user = result.scalars().first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "result": True,
+        "user": {
+            "id": int(user.id),
+            "name": str(user.name),
+            "followers": [{"id": int(f.id), "name": str(f.name)} for f in user.followers],
+            "following": [{"id": int(f.id), "name": str(f.name)} for f in user.following]
+        }
+    }
 
 # POST METHOD =======================================================================================
 
@@ -132,6 +162,31 @@ async def like_tweet(
 
     return {"result": True}
 
+
+
+
+@router.post("/users/{user_id}/follow", response_model=BaseResponse)
+async def follow_user(
+        user_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Подписаться на пользователя"""
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot follow yourself")
+
+    result = await db.execute(select(User).options(selectinload(User.followers)).where(User.id == user_id))
+    user_to_follow = result.scalars().first()
+
+    if not user_to_follow:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not any(u.id == current_user.id for u in user_to_follow.followers):
+        user_to_follow.followers.append(current_user)
+        await db.commit()
+
+    return {"result": True}
+
 # DELETE METHOD =======================================================================================
 
 @router.delete("/tweets/{tweet_id}/likes", response_model=BaseResponse)
@@ -179,5 +234,57 @@ async def delete_tweet(
 
     return {"result": True}
 
+# --- Эндпоинты пользователей ---
+
+@router.get("/users/me")
+async def get_my_profile(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Получение информации о своем профиле"""
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.followers), # Изменили с followers_ref на followers
+            selectinload(User.following)
+        )
+        .where(User.id == current_user.id)
+    )
+    user = result.scalars().first()
+
+    if not user:
+         raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "result": True,
+        "user": {
+            "id": int(user.id),
+            "name": str(user.name),
+            "followers": [{"id": int(f.id), "name": str(f.name)} for f in user.followers],
+            "following": [{"id": int(f.id), "name": str(f.name)} for f in user.following]
+        }
+    }
 
 
+
+
+
+@router.delete("/users/{user_id}/follow", response_model=BaseResponse)
+async def unfollow_user(
+        user_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Отписаться от пользователя"""
+    result = await db.execute(select(User).options(selectinload(User.followers)).where(User.id == user_id))
+    user_to_unfollow = result.scalars().first()
+
+    if not user_to_unfollow:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    me = next((u for u in user_to_unfollow.followers if u.id == current_user.id), None)
+    if me:
+        user_to_unfollow.followers.remove(me)
+        await db.commit()
+
+    return {"result": True}
