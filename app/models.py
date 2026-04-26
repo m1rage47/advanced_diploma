@@ -27,7 +27,6 @@ class User(Base):
 
     tweets = relationship("Tweet", back_populates="author")
 
-    # Теперь связи прописаны явно с обеих сторон (PyCharm будет доволен)
     following = relationship(
         "User",
         secondary=followers_table,

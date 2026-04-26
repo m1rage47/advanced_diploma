@@ -8,15 +8,13 @@ from typing import List
 
 from database import get_db
 from models import User, Tweet, Media, likes, followers_table
-from sсhemas import (
+from schemas import (
     BaseResponse, TweetCreate, TweetListResponse,
     MediaResponse, UserProfile, UserShort, TweetResponse
 )
 
 router = APIRouter(prefix="/api")
 
-
-# --- Вспомогательная функция для проверки пользователя ---
 async def get_current_user(api_key: str = Header(None), db: AsyncSession = Depends(get_db)):
     if not api_key:
         raise HTTPException(status_code=401, detail="api-key header missing")
@@ -29,39 +27,36 @@ async def get_current_user(api_key: str = Header(None), db: AsyncSession = Depen
         raise HTTPException(status_code=401, detail="Invalid api-key")
     return user
 
-
-# --- Эндпоинты ---
-
 # GET METHOD =======================================================================================
 
-@router.get("/tweets", response_model=TweetListResponse)
-async def get_tweets(
+@router.get("/users/me")
+async def get_my_profile(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """Получение ленты твитов"""
-    # Загружаем твиты вместе с авторами, лайками и вложениями
+    """Получение информации о своем профиле"""
     result = await db.execute(
-        select(Tweet).options(
-            selectinload(Tweet.author),
-            selectinload(Tweet.liked_by),
-            selectinload(Tweet.attachments)
-        ).order_by(Tweet.id.desc())
+        select(User)
+        .options(
+            selectinload(User.followers), # Изменили с followers_ref на followers
+            selectinload(User.following)
+        )
+        .where(User.id == current_user.id)
     )
-    tweets_db = result.scalars().all()
+    user = result.scalars().first()
 
-    # Преобразуем в формат ответа
-    tweets_res = []
-    for t in tweets_db:
-        tweets_res.append(TweetResponse(
-            id=t.id,
-            content=t.content,
-            attachments=[m.file_path for m in t.attachments],
-            author=UserShort.model_validate(t.author),
-            likes=[UserShort.model_validate(u) for u in t.liked_by]
-        ))
+    if not user:
+         raise HTTPException(status_code=404, detail="User not found")
 
-    return {"result": True, "tweets": tweets_res}
+    return {
+        "result": True,
+        "user": {
+            "id": int(user.id),
+            "name": str(user.name),
+            "followers": [{"id": int(f.id), "name": str(f.name)} for f in user.followers],
+            "following": [{"id": int(f.id), "name": str(f.name)} for f in user.following]
+        }
+    }
 
 @router.get("/users/{user_id}")
 async def get_user_profile(
@@ -92,6 +87,34 @@ async def get_user_profile(
             "following": [{"id": int(f.id), "name": str(f.name)} for f in user.following]
         }
     }
+
+@router.get("/tweets", response_model=TweetListResponse)
+async def get_tweets(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """Получение ленты твитов"""
+    result = await db.execute(
+        select(Tweet).options(
+            selectinload(Tweet.author),
+            selectinload(Tweet.liked_by),
+            selectinload(Tweet.attachments)
+        ).order_by(Tweet.id.desc())
+    )
+    tweets_db = result.scalars().all()
+
+    # Преобразуем в формат ответа
+    tweets_res = []
+    for t in tweets_db:
+        tweets_res.append(TweetResponse(
+            id=t.id,
+            content=t.content,
+            attachments=[m.file_path for m in t.attachments],
+            author=UserShort.model_validate(t.author),
+            likes=[UserShort.model_validate(u) for u in t.liked_by]
+        ))
+
+    return {"result": True, "tweets": tweets_res}
 
 # POST METHOD =======================================================================================
 
@@ -162,9 +185,6 @@ async def like_tweet(
 
     return {"result": True}
 
-
-
-
 @router.post("/users/{user_id}/follow", response_model=BaseResponse)
 async def follow_user(
         user_id: int,
@@ -233,41 +253,6 @@ async def delete_tweet(
     await db.commit()
 
     return {"result": True}
-
-# --- Эндпоинты пользователей ---
-
-@router.get("/users/me")
-async def get_my_profile(
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-):
-    """Получение информации о своем профиле"""
-    result = await db.execute(
-        select(User)
-        .options(
-            selectinload(User.followers), # Изменили с followers_ref на followers
-            selectinload(User.following)
-        )
-        .where(User.id == current_user.id)
-    )
-    user = result.scalars().first()
-
-    if not user:
-         raise HTTPException(status_code=404, detail="User not found")
-
-    return {
-        "result": True,
-        "user": {
-            "id": int(user.id),
-            "name": str(user.name),
-            "followers": [{"id": int(f.id), "name": str(f.name)} for f in user.followers],
-            "following": [{"id": int(f.id), "name": str(f.name)} for f in user.following]
-        }
-    }
-
-
-
-
 
 @router.delete("/users/{user_id}/follow", response_model=BaseResponse)
 async def unfollow_user(

@@ -3,7 +3,7 @@ from typing import List, Optional
 
 class BaseResponse(BaseModel):
     result: bool = True
-    tweet_id: Optional[int]
+    tweet_id: Optional[int] = None
 
 class UserShort(BaseModel):
     id: int
